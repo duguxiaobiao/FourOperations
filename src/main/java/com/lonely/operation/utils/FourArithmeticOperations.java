@@ -19,6 +19,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -40,7 +41,7 @@ public class FourArithmeticOperations {
     /**
      * 表达式队列  即例如： 1+2+{xxx.xxx}+3
      */
-    private static Queue<String> expressionQueue;
+    private static Queue<Object> expressionQueue;
 
 
     /**
@@ -60,6 +61,11 @@ public class FourArithmeticOperations {
     private static List<String> operators = ArithmeticOperatorEnum.getOperations();
 
     /**
+     * 是否存在字符串拼接操作
+     */
+    private static boolean existsStringHandler;
+
+    /**
      * js脚本引擎对象,但是在docker环境中会导致该对象为null，则可以使用另一种方法 ExpressionTree类使用
      */
     private static ScriptEngine scriptEngine = new ScriptEngineManager().getEngineByName("JavaScript");
@@ -71,15 +77,15 @@ public class FourArithmeticOperations {
 
         ExpressionValueBean expressionValueBean = new ExpressionValueBean();
         Queue<List<ParamBean>> paramQueue = new ConcurrentLinkedQueue<>();
-        paramQueue.add(new ArrayList<ParamBean>(){{
-            this.add(new ParamBean("score","java.lang.Double",false));
+        paramQueue.add(new ArrayList<ParamBean>() {{
+            this.add(new ParamBean("score", "java.lang.Double", false));
         }});
 
         Queue<List<ParamBean>> newQueue = new ConcurrentLinkedQueue<>(paramQueue);
 
         expressionValueBean.setRightParamBeans(paramQueue);
         expressionValueBean.setRightFieldValueExpression("1+2+3+{score}+1");
-        analysisAndCalculationProcess(student,expressionValueBean);
+        analysisAndCalculationProcess(student, expressionValueBean);
 
         /*analysisAndCalculationProcess(student,"1+2+3+{score}");
         analysisAndCalculationProcess(student,"1+2");
@@ -89,6 +95,7 @@ public class FourArithmeticOperations {
 
     /**
      * 解析表达式，并返回最终的结果
+     *
      * @param object
      * @param expressionValueBean
      */
@@ -98,7 +105,7 @@ public class FourArithmeticOperations {
         }
 
         //分析表达式，存入到表达式队列中
-        analysisProcess(object,expressionValueBean);
+        analysisProcess(object, expressionValueBean);
 
         //计算最终表达式的结果
         return calculationProcess();
@@ -112,16 +119,20 @@ public class FourArithmeticOperations {
      * @param object
      * @param expressionValueBean
      */
-    private static void analysisProcess(Object object,ExpressionValueBean expressionValueBean) {
+    private static void analysisProcess(Object object, ExpressionValueBean expressionValueBean) {
 
         expressionQueue = new ConcurrentLinkedQueue<>();
         tempCalcQueue = new ConcurrentLinkedQueue<>();
         expressionParamConfigurations = expressionValueBean.getRightParamBeans();
+        existsStringHandler = false;
 
         String expression = expressionValueBean.getRightFieldValueExpression();
 
         for (int i = 0; i < expression.length(); i++) {
             String currChar = String.valueOf(expression.charAt(i));
+            if (currChar.trim().isEmpty()) {
+                continue;
+            }
 
             switch (currChar) {
                 case "{":
@@ -160,7 +171,23 @@ public class FourArithmeticOperations {
     private static Object calculationProcess() {
 
         //从队列中获取最终的表达式信息
-        String finalExpression = String.join("", expressionQueue);
+        String finalExpression = null;
+
+        if (expressionQueue.isEmpty()) {
+            throw new RuntimeException("没有表达式需要计算，请检查..");
+        }
+
+        //判断是否存在字符串拼接处理
+        if (existsStringHandler) {
+            //所有的根据java 字符串拼接处理,这里就会忽略所有的运算符
+            return StringUtils.join(expressionQueue.stream().map(String::valueOf).filter(x -> !operators.contains(x)).toArray());
+
+        }
+
+        //不存在字符串拼接,纯四则运算
+        finalExpression = expressionQueue.stream().map(String::valueOf).collect(Collectors.joining());
+
+
         if (StringUtils.isEmpty(finalExpression)) {
             throw new RuntimeException("最终构架的表达式为空，无法计算，请检查");
         }
@@ -208,7 +235,7 @@ public class FourArithmeticOperations {
         //获取当前的表达式对应的类型配置信息
         List<ParamBean> currParamConfigs = expressionParamConfigurations.remove();
 
-        Object result = DefaultAssignmentSubstitutionUtil.getExpressionResults(object,currParamConfigs);
+        Object result = DefaultAssignmentSubstitutionUtil.getExpressionResults(object, currParamConfigs);
 
         //计算完后，清空临时队列
         tempCalcQueue.clear();
@@ -223,10 +250,10 @@ public class FourArithmeticOperations {
      * @param expression
      * @return
      */
-    private static String checkResultAndReturnString(Object result, String expression) {
+    private static Object checkResultAndReturnString(Object result, String expression) {
         if (ClassUtil.isWrapClass(result.getClass())) {
             //基础数据类型
-            return String.valueOf(result);
+            return result;
         } else {
             //引用类型
             if (result instanceof String) {
@@ -237,7 +264,8 @@ public class FourArithmeticOperations {
                     throw new RuntimeException("针对存在字符串类型的数据结果，不支持除了+号之外的运算");
                 } else {
                     //最多只存在 + 号运算符
-                    return MessageFormat.format("\"{0}\"", result);
+                    existsStringHandler = true;
+                    return result;
                 }
             } else {
                 //其他对象类型，不支持四则运算
@@ -296,7 +324,7 @@ public class FourArithmeticOperations {
         Pattern pattern = Pattern.compile(rexp);
         Matcher matcher = pattern.matcher(expression);
         while (matcher.find()) {
-            System.out.println(expression.substring(matcher.start(),matcher.end()));
+            System.out.println(expression.substring(matcher.start(), matcher.end()));
             count++;
         }
         return count;
